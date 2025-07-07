@@ -240,19 +240,22 @@ class MarkdownToPdfConverter(QMainWindow):
         self.browse_input_btn.setObjectName("browseButton")
         self.browse_input_btn.clicked.connect(self.browse_input_files)
         self.browse_input_btn.setMinimumHeight(32)
-        self.browse_input_btn.setMaximumWidth(120)
+        self.browse_input_btn.setMinimumWidth(100)
+        self.browse_input_btn.setMaximumWidth(130)
         
         self.new_file_btn = QPushButton("📝 新規作成")
         self.new_file_btn.setObjectName("newFileButton")
         self.new_file_btn.clicked.connect(self.create_new_file)
         self.new_file_btn.setMinimumHeight(32)
-        self.new_file_btn.setMaximumWidth(100)
+        self.new_file_btn.setMinimumWidth(85)
+        self.new_file_btn.setMaximumWidth(110)
         
         self.clear_files_btn = QPushButton("🗑 クリア")
         self.clear_files_btn.setObjectName("clearButton")
         self.clear_files_btn.clicked.connect(self.clear_files)
         self.clear_files_btn.setMinimumHeight(32)
-        self.clear_files_btn.setMaximumWidth(80)
+        self.clear_files_btn.setMinimumWidth(65)
+        self.clear_files_btn.setMaximumWidth(85)
         self.clear_files_btn.setEnabled(False)
         
         file_buttons_layout.addWidget(self.browse_input_btn)
@@ -405,6 +408,12 @@ class MarkdownToPdfConverter(QMainWindow):
         self.markdown_editor.setMinimumHeight(300)
         self.markdown_editor.textChanged.connect(self.on_editor_text_changed)
         
+        # プレーンテキストモードに設定（Markdownプレビュー化けを防止）
+        self.markdown_editor.setAcceptRichText(False)
+        
+        # 貼り付け時もプレーンテキストとして処理
+        self.markdown_editor.insertFromMimeData = self.insert_plain_text_only
+        
         # エディタのスタイリング
         self.markdown_editor.setStyleSheet("""
             QTextEdit#markdownEditor {
@@ -428,6 +437,14 @@ class MarkdownToPdfConverter(QMainWindow):
         self.current_editing_file = None
         
         return center_widget
+        
+    def insert_plain_text_only(self, source):
+        """貼り付け時にプレーンテキストのみを挿入"""
+        if source.hasText():
+            # プレーンテキストのみを取得して挿入
+            plain_text = source.text()
+            cursor = self.markdown_editor.textCursor()
+            cursor.insertText(plain_text)
         
     def create_right_panel(self):
         """右側のプレビューパネルを作成"""
@@ -573,7 +590,8 @@ class MarkdownToPdfConverter(QMainWindow):
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-                padding: 8px 16px;
+                font-size: 12px;
+                padding: 6px 8px;
             }
             
             QPushButton#browseButton:hover {
@@ -586,7 +604,8 @@ class MarkdownToPdfConverter(QMainWindow):
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-                padding: 8px 16px;
+                font-size: 12px;
+                padding: 6px 8px;
             }
             
             QPushButton#clearButton:hover {
@@ -599,7 +618,8 @@ class MarkdownToPdfConverter(QMainWindow):
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-                padding: 8px 16px;
+                font-size: 12px;
+                padding: 6px 8px;
             }
             
             QPushButton#newFileButton:hover {
@@ -1454,9 +1474,14 @@ class MarkdownToPdfConverter(QMainWindow):
                 return
         
         try:
-            # MarkdownをHTMLに変換
-            with open(current_file, 'r', encoding='utf-8') as f:
-                content = f.read()
+            # MarkdownをHTMLに変換（現在編集中のファイルの場合はエディタの内容を使用）
+            if current_file == self.current_editing_file and self.markdown_editor.toPlainText().strip():
+                # エディタの内容を使用（編集中の場合）
+                content = self.markdown_editor.toPlainText()
+            else:
+                # ファイルから読み込み
+                with open(current_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
             html_content = self.markdown_to_html(content)
             
             # 全体進捗を更新（HTML変換完了）
@@ -1640,6 +1665,36 @@ class MarkdownToPdfConverter(QMainWindow):
         
     def closeEvent(self, event):
         """アプリケーション終了時の処理"""
+        # 未保存の変更があるかチェック
+        if self.editor_modified and self.current_editing_file:
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("未保存の変更")
+            msg_box.setText("編集内容が保存されていません。")
+            msg_box.setInformativeText("どうしますか？")
+            msg_box.setIcon(QMessageBox.Question)
+            
+            # 日本語ボタンを追加
+            save_btn = msg_box.addButton("保存して終了", QMessageBox.AcceptRole)
+            discard_btn = msg_box.addButton("保存せずに終了", QMessageBox.DestructiveRole)
+            cancel_btn = msg_box.addButton("キャンセル", QMessageBox.RejectRole)
+            
+            msg_box.setDefaultButton(save_btn)
+            msg_box.exec_()
+            
+            clicked_button = msg_box.clickedButton()
+            
+            if clicked_button == save_btn:
+                # 保存を試行
+                self.save_current_file()
+                # 保存がキャンセルされた場合（ダイアログでキャンセル）は終了もキャンセル
+                if self.editor_modified:  # まだ変更状態なら保存がキャンセルされた
+                    event.ignore()
+                    return
+            elif clicked_button == cancel_btn:
+                event.ignore()
+                return
+            # discard_btnの場合はそのまま続行
+        
         self.cleanup_temp_files()
         event.accept()
 

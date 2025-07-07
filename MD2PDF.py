@@ -7,7 +7,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QLineEdit, 
                              QFileDialog, QProgressBar, QTextEdit, QGroupBox,
                              QMessageBox, QCheckBox, QListWidget, QListWidgetItem,
-                             QSplitter, QFrame, QScrollArea, QSpinBox, QComboBox)
+                             QSplitter, QFrame, QScrollArea, QSpinBox, QComboBox,
+                             QDialog, QDialogButtonBox, QInputDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QUrl, QTimer, QMarginsF
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineSettings
 from PyQt5.QtGui import QPageLayout, QPageSize, QDragEnterEvent, QDropEvent, QFont, QIcon, QPalette, QColor
@@ -15,6 +16,9 @@ import markdown
 from markdown.extensions import fenced_code, tables, toc, nl2br, sane_lists
 import tempfile
 import json
+
+
+
 
 
 class FileItem(QFrame):
@@ -136,7 +140,7 @@ class MarkdownToPdfConverter(QMainWindow):
         
     def init_ui(self):
         self.setWindowTitle("Markdown to PDF Converter")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1400, 800)
         
         # アイコンを設定
         icon_path = Path(__file__).parent / "img" / "icon.ico"
@@ -147,7 +151,7 @@ class MarkdownToPdfConverter(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         
-        # メインレイアウト（左右分割）
+        # メインレイアウト（3分割）
         main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
@@ -160,12 +164,16 @@ class MarkdownToPdfConverter(QMainWindow):
         left_panel = self.create_left_panel()
         splitter.addWidget(left_panel)
         
+        # 中央パネル（エディタエリア）
+        center_panel = self.create_center_panel()
+        splitter.addWidget(center_panel)
+        
         # 右側パネル（プレビューエリア）
         right_panel = self.create_right_panel()
         splitter.addWidget(right_panel)
         
-        # スプリッターの初期サイズ設定（左:右 = 2:3）
-        splitter.setSizes([400, 600])
+        # スプリッターの初期サイズ設定（左:中央:右 = 3:4:4）
+        splitter.setSizes([350, 400, 400])
         
         # ドラッグアンドドロップを有効化
         self.setAcceptDrops(True)
@@ -226,25 +234,35 @@ class MarkdownToPdfConverter(QMainWindow):
         input_group.setObjectName("inputGroup")
         layout = QVBoxLayout()
         
-        # ファイル選択ボタン
-        file_select_layout = QHBoxLayout()
-        self.browse_input_btn = QPushButton("📁 ファイルを選択")
+        # ファイル操作ボタン（1行に配置）
+        file_buttons_layout = QHBoxLayout()
+        self.browse_input_btn = QPushButton("📁 ファイル選択")
         self.browse_input_btn.setObjectName("browseButton")
         self.browse_input_btn.clicked.connect(self.browse_input_files)
-        self.browse_input_btn.setMinimumHeight(35)
+        self.browse_input_btn.setMinimumHeight(32)
+        self.browse_input_btn.setMaximumWidth(120)
+        
+        self.new_file_btn = QPushButton("📝 新規作成")
+        self.new_file_btn.setObjectName("newFileButton")
+        self.new_file_btn.clicked.connect(self.create_new_file)
+        self.new_file_btn.setMinimumHeight(32)
+        self.new_file_btn.setMaximumWidth(100)
         
         self.clear_files_btn = QPushButton("🗑 クリア")
         self.clear_files_btn.setObjectName("clearButton")
         self.clear_files_btn.clicked.connect(self.clear_files)
-        self.clear_files_btn.setMinimumHeight(35)
+        self.clear_files_btn.setMinimumHeight(32)
+        self.clear_files_btn.setMaximumWidth(80)
         self.clear_files_btn.setEnabled(False)
         
-        file_select_layout.addWidget(self.browse_input_btn)
-        file_select_layout.addWidget(self.clear_files_btn)
-        layout.addLayout(file_select_layout)
+        file_buttons_layout.addWidget(self.browse_input_btn)
+        file_buttons_layout.addWidget(self.new_file_btn)
+        file_buttons_layout.addWidget(self.clear_files_btn)
+        file_buttons_layout.addStretch()  # 右側にスペースを追加
+        layout.addLayout(file_buttons_layout)
         
         # ドラッグ&ドロップエリア
-        self.drop_area = QLabel("📄 ここにMarkdownファイルを\nドラッグ&ドロップ")
+        self.drop_area = QLabel("📄 ここにMarkdown/テキストファイルを\nドラッグ&ドロップ")
         self.drop_area.setObjectName("dropArea")
         self.drop_area.setAlignment(Qt.AlignCenter)
         self.drop_area.setMinimumHeight(80)
@@ -284,6 +302,9 @@ class MarkdownToPdfConverter(QMainWindow):
         
         # ファイルアイテムのリスト
         self.file_items = []
+        
+        # 一時ファイルの管理
+        self.temp_files = []  # 貼り付けで作成した一時ファイルを管理
         
         input_group.setLayout(layout)
         return input_group
@@ -336,6 +357,77 @@ class MarkdownToPdfConverter(QMainWindow):
         
         options_group.setLayout(layout)
         return options_group
+        
+    def create_center_panel(self):
+        """中央のエディタパネルを作成"""
+        center_widget = QWidget()
+        center_widget.setMinimumWidth(300)
+        layout = QVBoxLayout(center_widget)
+        layout.setSpacing(5)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        # エディタヘッダー
+        header_widget = QWidget()
+        header_widget.setMaximumHeight(40)
+        header_widget.setMinimumHeight(40)
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        editor_label = QLabel("Markdownエディタ")
+        editor_label.setObjectName("editorLabel")
+        header_layout.addWidget(editor_label)
+        
+        # エディタ制御ボタン
+        self.save_btn = QPushButton("💾 保存")
+        self.save_btn.setMaximumWidth(60)
+        self.save_btn.setMaximumHeight(30)
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self.save_current_file)
+        self.save_btn.setObjectName("saveButton")
+        
+        self.reload_btn = QPushButton("🔄 再読込")
+        self.reload_btn.setMaximumWidth(70)
+        self.reload_btn.setMaximumHeight(30)
+        self.reload_btn.setEnabled(False)
+        self.reload_btn.clicked.connect(self.reload_current_file)
+        self.reload_btn.setObjectName("reloadButton")
+        
+        header_layout.addStretch()
+        header_layout.addWidget(self.save_btn)
+        header_layout.addWidget(self.reload_btn)
+        
+        layout.addWidget(header_widget)
+        
+        # Markdownエディタ
+        self.markdown_editor = QTextEdit()
+        self.markdown_editor.setObjectName("markdownEditor")
+        self.markdown_editor.setPlaceholderText("ファイルを選択すると、ここで編集できます...")
+        self.markdown_editor.setMinimumHeight(300)
+        self.markdown_editor.textChanged.connect(self.on_editor_text_changed)
+        
+        # エディタのスタイリング
+        self.markdown_editor.setStyleSheet("""
+            QTextEdit#markdownEditor {
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: white;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 13px;
+                line-height: 1.4;
+                padding: 8px;
+            }
+            QTextEdit#markdownEditor:focus {
+                border-color: #3498db;
+            }
+        """)
+        
+        layout.addWidget(self.markdown_editor, 1)
+        
+        # エディタの状態管理
+        self.editor_modified = False
+        self.current_editing_file = None
+        
+        return center_widget
         
     def create_right_panel(self):
         """右側のプレビューパネルを作成"""
@@ -501,6 +593,19 @@ class MarkdownToPdfConverter(QMainWindow):
                 background-color: #c0392b;
             }
             
+            QPushButton#newFileButton {
+                background-color: #9b59b6;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                padding: 8px 16px;
+            }
+            
+            QPushButton#newFileButton:hover {
+                background-color: #8e44ad;
+            }
+            
             QLineEdit {
                 border: 2px solid #bdc3c7;
                 border-radius: 4px;
@@ -590,6 +695,49 @@ class MarkdownToPdfConverter(QMainWindow):
                 background-color: #f0f0f0;
             }
             
+            QLabel#editorLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #2c3e50;
+            }
+            
+            QPushButton#saveButton {
+                background-color: #27ae60;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 4px 8px;
+            }
+            
+            QPushButton#saveButton:hover {
+                background-color: #229954;
+            }
+            
+            QPushButton#saveButton:disabled {
+                background-color: #bdc3c7;
+                color: #7f8c8d;
+            }
+            
+            QPushButton#reloadButton {
+                background-color: #f39c12;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 4px 8px;
+            }
+            
+            QPushButton#reloadButton:hover {
+                background-color: #e67e22;
+            }
+            
+            QPushButton#reloadButton:disabled {
+                background-color: #bdc3c7;
+                color: #7f8c8d;
+            }
 
         """)
 
@@ -623,7 +771,7 @@ class MarkdownToPdfConverter(QMainWindow):
             
     def dropEvent(self, event: QDropEvent):
         files = [u.toLocalFile() for u in event.mimeData().urls()]
-        markdown_files = [f for f in files if f.lower().endswith(('.md', '.markdown'))]
+        markdown_files = [f for f in files if f.lower().endswith(('.md', '.markdown', '.txt'))]
         
         if markdown_files:
             self.add_files(markdown_files)
@@ -645,10 +793,94 @@ class MarkdownToPdfConverter(QMainWindow):
     def browse_input_files(self):
         file_paths, _ = QFileDialog.getOpenFileNames(
             self, "Markdownファイルを選択", "", 
-            "Markdown Files (*.md *.markdown);;All Files (*.*)"
+            "Markdown Files (*.md *.markdown *.txt);;All Files (*.*)"
         )
         if file_paths:
             self.add_files(file_paths)
+            
+    def create_new_file(self):
+        """新しいMarkdownファイルを作成"""
+        # ファイル名を入力
+        file_name, ok = QInputDialog.getText(
+            self, "新規ファイル作成", 
+            "ファイル名を入力してください:", 
+            text="新しいドキュメント"
+        )
+        
+        if not ok or not file_name.strip():
+            return
+            
+        file_name = file_name.strip()
+        
+        # 重複チェックとWindows風の番号付け
+        unique_file_name = self.get_unique_file_name(file_name)
+        
+        try:
+            # デフォルトのMarkdownテンプレート
+            default_content = f"""# {unique_file_name}
+
+## 概要
+ここに概要を書いてください。
+
+## 内容
+ここに内容を書いてください。
+
+### サブセクション
+- リスト項目1
+- リスト項目2
+- リスト項目3
+
+## まとめ
+ここにまとめを書いてください。
+"""
+            
+            # 一時ファイルを作成（ランダム値なしの単純な名前）
+            temp_dir = tempfile.gettempdir()
+            temp_file_path = os.path.join(temp_dir, f"{unique_file_name}.md")
+            
+            # ファイルが既に存在する場合は別の名前を生成
+            counter = 1
+            original_path = temp_file_path
+            while os.path.exists(temp_file_path):
+                base_name = Path(original_path).stem
+                temp_file_path = os.path.join(temp_dir, f"{base_name}_temp_{counter}.md")
+                counter += 1
+            
+            with open(temp_file_path, 'w', encoding='utf-8') as f:
+                f.write(default_content)
+            
+            # 一時ファイルのパスを管理リストに追加
+            self.temp_files.append(temp_file_path)
+            
+            # ファイルリストに追加
+            self.add_files([temp_file_path])
+            
+            self.status_label.setText(f"新しいMarkdownファイル '{unique_file_name}' を作成しました")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"新規ファイルの作成に失敗しました:\n{str(e)}")
+            
+    def get_unique_file_name(self, base_name):
+        """Windows風の重複ファイル名処理"""
+        # 現在のファイルリストから表示名を取得
+        existing_names = []
+        for item in self.file_items:
+            if hasattr(item, 'file_label'):
+                name = item.file_label.text()
+                if name.endswith('.md'):
+                    name = name[:-3]  # .md拡張子を除去
+                existing_names.append(name)
+        
+        # 重複チェック
+        if base_name not in existing_names:
+            return base_name
+        
+        # 番号付けで重複を回避
+        counter = 2
+        while f"{base_name} {counter}" in existing_names:
+            counter += 1
+        
+        return f"{base_name} {counter}"
             
     def add_files(self, file_paths):
         """ファイルをリストに追加"""
@@ -681,6 +913,10 @@ class MarkdownToPdfConverter(QMainWindow):
         
         self.current_file_index = 0
         self.web_view.setHtml("")
+        
+        # エディタもクリア
+        self.clear_editor()
+        
         self.update_ui_state()
         
     def remove_single_file(self, file_path):
@@ -714,6 +950,7 @@ class MarkdownToPdfConverter(QMainWindow):
             else:
                 self.web_view.setHtml("")
                 self.current_file_index = 0
+                self.clear_editor()
             
             self.update_ui_state()
          
@@ -743,7 +980,7 @@ class MarkdownToPdfConverter(QMainWindow):
             self.drop_area.setText("📄 追加のファイルを\nドラッグ&ドロップ")
         else:
             self.status_label.setText("ファイルを選択してください")
-            self.drop_area.setText("📄 ここにMarkdownファイルを\nドラッグ&ドロップ")
+            self.drop_area.setText("📄 ここにMarkdown/テキストファイルを\nドラッグ&ドロップ")
             
     def browse_output_folder(self):
         folder_path = QFileDialog.getExistingDirectory(self, "出力フォルダを選択")
@@ -759,6 +996,9 @@ class MarkdownToPdfConverter(QMainWindow):
             if not self.output_folder.text():
                 self.output_folder.setText(str(Path(file_path).parent))
             
+            # エディタにコンテンツをロード
+            self.load_content_to_editor(content, file_path)
+            
             # プレビューを更新
             html_content = self.markdown_to_html(content)
             
@@ -768,13 +1008,150 @@ class MarkdownToPdfConverter(QMainWindow):
             
             # ファイル名を更新
             file_name = Path(file_path).stem
-            self.status_label.setText(f"プレビュー中: {file_name}.md")
+            self.status_label.setText(f"編集中: {file_name}.md")
             
             # ページ情報を更新（簡略化）
             self.update_page_info()
             
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"ファイルの読み込みに失敗しました:\n{str(e)}")
+            
+    def load_content_to_editor(self, content, file_path):
+        """コンテンツをエディタにロード"""
+        # テキスト変更イベントを一時的に無効化
+        self.markdown_editor.blockSignals(True)
+        self.markdown_editor.setPlainText(content)
+        self.markdown_editor.blockSignals(False)
+        
+        # エディタの状態を更新
+        self.current_editing_file = file_path
+        self.editor_modified = False
+        self.save_btn.setEnabled(False)
+        self.reload_btn.setEnabled(True)
+        
+    def on_editor_text_changed(self):
+        """エディタのテキストが変更された時の処理"""
+        if self.current_editing_file:
+            self.editor_modified = True
+            self.save_btn.setEnabled(True)
+            
+            # リアルタイムプレビュー更新
+            content = self.markdown_editor.toPlainText()
+            html_content = self.markdown_to_html(content)
+            
+            # ベースURLを設定
+            base_url = QUrl.fromLocalFile(str(Path(self.current_editing_file).parent) + '/')
+            self.web_view.setHtml(html_content, base_url)
+            
+    def save_current_file(self):
+        """現在編集中のファイルを保存"""
+        if not self.current_editing_file or not self.editor_modified:
+            return
+            
+        try:
+            content = self.markdown_editor.toPlainText()
+            old_file_path = self.current_editing_file
+            
+            # 一時ファイルの場合は名前を付けて保存
+            if self.current_editing_file in self.temp_files:
+                # デフォルトのファイル名を提案
+                default_name = "document.md"
+                if hasattr(self, 'current_file_index') and self.current_file_index < len(self.file_items):
+                    current_item = self.file_items[self.current_file_index]
+                    if current_item and hasattr(current_item, 'file_label'):
+                        suggested_name = current_item.file_label.text()
+                        if not suggested_name.endswith('.md'):
+                            suggested_name += '.md'
+                        default_name = suggested_name
+                
+                file_path, _ = QFileDialog.getSaveFileName(
+                    self, "名前を付けて保存", 
+                    str(Path.home() / default_name),
+                    "Markdown Files (*.md);;Text Files (*.txt);;All Files (*.*)"
+                )
+                if not file_path:
+                    return
+                
+                # 上書き確認（QFileDialogで既に確認されるが、明示的に確認）
+                if os.path.exists(file_path):
+                    reply = QMessageBox.question(
+                        self, "上書き確認",
+                        f"ファイル '{Path(file_path).name}' は既に存在します。\n上書きしますか？",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.No
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
+                    
+                # 一時ファイルリストから削除
+                self.temp_files.remove(self.current_editing_file)
+                
+                # 新しいファイルパスを設定
+                self.current_editing_file = file_path
+                
+                # ファイルリストとUIを更新
+                self.update_file_path_in_lists(old_file_path, file_path)
+                
+            else:
+                # 既存ファイルの場合は上書き保存
+                file_path = self.current_editing_file
+            
+            # ファイルに保存
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+                
+            self.editor_modified = False
+            self.save_btn.setEnabled(False)
+            
+            file_name = Path(file_path).stem
+            self.status_label.setText(f"保存完了: {file_name}.md")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"ファイルの保存に失敗しました:\n{str(e)}")
+            
+    def update_file_path_in_lists(self, old_path, new_path):
+        """ファイルパスの変更をリストとUIに反映"""
+        # current_filesリストを更新
+        for i, file_path in enumerate(self.current_files):
+            if file_path == old_path:
+                self.current_files[i] = new_path
+                break
+        
+        # file_itemsのパスとラベルを更新
+        for item in self.file_items:
+            if item.file_path == old_path:
+                item.file_path = new_path
+                # ファイル名ラベルを更新
+                item.file_label.setText(Path(new_path).name)
+                item.file_label.setToolTip(new_path)
+                break
+            
+    def reload_current_file(self):
+        """現在のファイルを再読み込み"""
+        if not self.current_editing_file:
+            return
+            
+        if self.editor_modified:
+            reply = QMessageBox.question(
+                self, "確認", 
+                "編集内容が失われます。本当に再読み込みしますか？",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+                
+        self.load_markdown_file(self.current_editing_file)
+        
+    def clear_editor(self):
+        """エディタをクリア"""
+        self.markdown_editor.blockSignals(True)
+        self.markdown_editor.clear()
+        self.markdown_editor.blockSignals(False)
+        
+        self.current_editing_file = None
+        self.editor_modified = False
+        self.save_btn.setEnabled(False)
+        self.reload_btn.setEnabled(False)
             
     def update_page_info(self):
         """ページ情報を更新"""
@@ -1250,6 +1627,21 @@ class MarkdownToPdfConverter(QMainWindow):
             
         # プログレスバーを非表示にする
         QTimer.singleShot(2000, lambda: self.progress_bar.setVisible(False))
+        
+    def cleanup_temp_files(self):
+        """一時ファイルをクリーンアップ"""
+        for temp_file_path in self.temp_files:
+            try:
+                if os.path.exists(temp_file_path):
+                    os.unlink(temp_file_path)
+            except Exception as e:
+                print(f"一時ファイルの削除に失敗: {temp_file_path} - {e}")
+        self.temp_files.clear()
+        
+    def closeEvent(self, event):
+        """アプリケーション終了時の処理"""
+        self.cleanup_temp_files()
+        event.accept()
 
 
 def main():

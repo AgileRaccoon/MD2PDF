@@ -1,6 +1,6 @@
 # Markdown to PDF Converter
 
-GUIを備えたMarkdownからPDFへの変換ツールです。複数ファイルの一括変換、Mermaidダイアグラムのサポート、カスタム改ページ、ドラッグ&ドロップ対応など、使いやすい機能を提供します。
+GUIを備えたMarkdownからPDFへの変換ツールです。複数ファイルの一括変換、カスタム改ページ、ドラッグ&ドロップ対応など、使いやすい機能を提供します。
 
 ## 特徴
 
@@ -42,7 +42,7 @@ GUIを備えたMarkdownからPDFへの変換ツールです。複数ファイル
 
 2. **ビルドの実行**
    ```bash
-   python build.py
+   pyinstaller MD2PDF.spec
    ```
 
 3. **成果物**

@@ -1,0 +1,5 @@
+# Markdown to PDF Converter Dependencies
+PyQt5==5.15.9
+PyQtWebEngine==5.15.6
+Markdown==3.5.1
+Pygments==2.17.2  # コードハイライト用
